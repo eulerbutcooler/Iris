@@ -10,10 +10,10 @@ import (
 
 // ParsedResponse is the decoded LLM output.
 type ParsedResponse struct {
-	Ready     bool                        `json:"ready"`
-	Questions []string                    `json:"questions"`
-	Message   string                      `json:"message"`
-	Relay     *models.CreateRelayRequest  `json:"relay"`
+	Ready     bool                       `json:"ready"`
+	Questions []string                   `json:"questions"`
+	Message   string                     `json:"message"`
+	Relay     *models.CreateRelayRequest `json:"relay"`
 }
 
 // ParseResponse extracts a ParsedResponse from the raw LLM text.
@@ -40,8 +40,8 @@ func ParseResponse(raw string) (*ParsedResponse, error) {
 func stripCodeFences(s string) string {
 	s = strings.TrimSpace(s)
 	for _, fence := range []string{"```json", "```"} {
-		if strings.HasPrefix(s, fence) {
-			s = strings.TrimPrefix(s, fence)
+		if after, ok := strings.CutPrefix(s, fence); ok {
+			s = after
 			s = strings.TrimSuffix(s, "```")
 			s = strings.TrimSpace(s)
 			break

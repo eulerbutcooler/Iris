@@ -251,12 +251,10 @@ func (s *RelayStore) UpdateRelayActions(
 	}
 
 	// Re-insert
-	actions, err := insertActions(ctx, tx, relayID, req.Actions)
-	if err != nil {
+	if _, err := insertActions(ctx, tx, relayID, req.Actions); err != nil {
 		return nil, err
 	}
-	edges, err := insertEdges(ctx, tx, relayID, req.Edges)
-	if err != nil {
+	if _, err := insertEdges(ctx, tx, relayID, req.Edges); err != nil {
 		return nil, err
 	}
 
@@ -266,8 +264,6 @@ func (s *RelayStore) UpdateRelayActions(
 
 	// Reload the full relay
 	return s.GetRelay(ctx, relayID, userID)
-	_ = actions
-	_ = edges
 }
 
 // DeleteRelay removes a relay (cascades to actions, edges, executions).
