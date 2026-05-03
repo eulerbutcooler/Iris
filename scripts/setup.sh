@@ -4,9 +4,9 @@
 #   curl -fsSL https://raw.githubusercontent.com/YOURUSER/Iris/main/scripts/setup.sh | bash
 set -e
 
-REPO_URL="https://github.com/YOURUSER/Iris.git"   # ← change this
+REPO_URL="https://github.com/eulerbutcooler/Iris.git"   # ← change this
 APP_DIR="/home/iris/Iris"
-DOMAIN=""                                           # ← set your domain e.g. "yourdomain.com"
+DOMAIN="https://iris.amanyd.me"                                           # ← set your domain e.g. "yourdomain.com"
 
 echo "==> Installing dependencies..."
 apt-get update -q
