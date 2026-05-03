@@ -1,0 +1,9 @@
+go 1.24
+
+use (
+	./packages
+	./services/core
+	./services/hooks
+	./services/iris-telegram
+	./services/worker
+)
