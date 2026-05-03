@@ -2,6 +2,8 @@
   https://iris.amanyd.me
 </p>
 
+video - https://www.loom.com/share/dfa1e85cee40449b90ff07972e2badb0
+
 <h1 align="center">Iris</h1>
 <p align="center"><strong>AI-first automation platform — describe workflows in plain English, build them instantly.</strong></p>
 
