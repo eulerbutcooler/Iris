@@ -128,6 +128,23 @@ func (c *Client) CreateRelay(ctx context.Context, token string, req CreateRelayR
 	return &relay, json.NewDecoder(resp.Body).Decode(&relay)
 }
 
+// UpdateRelay replaces an existing relay's full definition via PUT /api/v1/relays/:id.
+func (c *Client) UpdateRelay(ctx context.Context, token, relayID string, req CreateRelayRequest) (*Relay, error) {
+	resp, err := c.do(ctx, http.MethodPut, "/api/v1/relays/"+relayID, token, req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("iris: update relay: status %d: %s", resp.StatusCode, body)
+	}
+
+	var relay Relay
+	return &relay, json.NewDecoder(resp.Body).Decode(&relay)
+}
+
 // TriggerRelay manually triggers a relay execution.
 func (c *Client) TriggerRelay(ctx context.Context, token, relayID string) error {
 	resp, err := c.do(ctx, http.MethodPost, "/api/v1/relays/"+relayID+"/trigger", token, nil)

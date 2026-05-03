@@ -1,0 +1,15 @@
+FROM golang:1.24-alpine AS builder
+WORKDIR /app
+COPY go.work go.work.sum ./
+COPY packages/           ./packages/
+COPY services/core/      ./services/core/
+COPY services/hooks/     ./services/hooks/
+COPY services/worker/    ./services/worker/
+COPY services/iris-telegram/ ./services/iris-telegram/
+RUN go work sync && \
+    go build -o /bin/iris-telegram ./services/iris-telegram/cmd/bot
+
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates tzdata
+COPY --from=builder /bin/iris-telegram /bin/iris-telegram
+CMD ["/bin/iris-telegram"]

@@ -1,0 +1,32 @@
+# ── Stage 1: build ────────────────────────────────────────────────────────────
+FROM golang:1.24-alpine AS builder
+WORKDIR /app
+
+# Copy workspace files first (cache layer)
+COPY go.work go.work.sum ./
+
+# Copy all modules (go.work references all of them)
+COPY packages/           ./packages/
+COPY services/core/      ./services/core/
+COPY services/hooks/     ./services/hooks/
+COPY services/worker/    ./services/worker/
+COPY services/iris-telegram/ ./services/iris-telegram/
+
+# Download deps and build
+RUN go work sync && \
+    go build -o /bin/iris-core ./services/core/cmd/api
+
+# ── Stage 2: runtime ──────────────────────────────────────────────────────────
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates tzdata postgresql-client
+
+# Copy binary and migrations
+COPY --from=builder /bin/iris-core /bin/iris-core
+COPY services/core/db/migrations /migrations
+
+# Entrypoint: run migrations then start server
+COPY docker/entrypoint-core.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 3000
+ENTRYPOINT ["/entrypoint.sh"]

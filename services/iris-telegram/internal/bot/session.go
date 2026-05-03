@@ -22,12 +22,13 @@ const (
 
 // Session holds all per-user state for one Telegram conversation.
 type Session struct {
-	State        SessionState
-	Token        string                   // Iris JWT, set after /login
-	DraftRelay   *iris.CreateRelayRequest // relay being built
-	DraftRelayID string                   // ID of the relay to delete (StateAwaitDelete)
-	Conversation []iris.AIMessage         // full LLM conversation history
-	LastActivity time.Time
+	State          SessionState
+	Token          string                   // Iris JWT, set after /login
+	DraftRelay     *iris.CreateRelayRequest // relay being built
+	DraftRelayID   string                   // ID of the relay to delete (StateAwaitDelete)
+	EditingRelayID string                   // ID of an existing saved relay being edited (StateEditing)
+	Conversation   []iris.AIMessage         // full LLM conversation history
+	LastActivity   time.Time
 }
 
 // SessionManager stores in-memory sessions keyed by Telegram user ID.

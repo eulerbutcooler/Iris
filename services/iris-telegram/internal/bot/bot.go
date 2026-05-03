@@ -195,6 +195,8 @@ func (b *Bot) dispatchCommand(ctx context.Context, chatID, userID int64, cmd, ar
 		b.cmdLogout(ctx, chatID, userID)
 	case "new":
 		b.cmdNew(ctx, chatID, userID)
+	case "edit":
+		b.cmdEdit(ctx, chatID, userID, strings.TrimSpace(args))
 	case "list":
 		b.cmdList(ctx, chatID, userID)
 	case "trigger":
@@ -267,6 +269,7 @@ func (b *Bot) cmdHelp(chatID int64) {
 /login — Link your Iris account
 /logout — Unlink your account
 /new — Create a relay using AI
+/edit \<name or ID\> — Edit an existing relay using AI
 /list — List your relays
 /toggle \<name or ID\> — Enable or disable a relay
 /enable \<name or ID\> — Enable a relay
@@ -310,9 +313,60 @@ func (b *Bot) cmdNew(ctx context.Context, chatID, userID int64) {
 	sess := b.sessions.Get(userID)
 	sess.State = StateDescribing
 	sess.DraftRelay = nil
+	sess.EditingRelayID = ""
 	sess.Conversation = nil
 	b.sessions.Set(userID, sess)
 	b.Send(chatID, "✦ *New Relay*\n\nDescribe what you want to automate in plain English. I'll build the relay for you.")
+}
+
+// cmdEdit enters the editing flow for an existing saved relay.
+func (b *Bot) cmdEdit(ctx context.Context, chatID, userID int64, query string) {
+	if !b.requireAuth(ctx, chatID, userID) {
+		return
+	}
+	if query == "" {
+		b.Send(chatID, "Usage: /edit \u003cname or ID\u003e\nExample: /edit my-relay")
+		return
+	}
+
+	link, ok := b.getLink(ctx, chatID, userID)
+	if !ok {
+		return
+	}
+
+	relays, err := b.iris.ListRelays(ctx, link.Token)
+	if err != nil {
+		b.log.Error("edit: list relays", "err", err)
+		b.Send(chatID, "❌ Failed to fetch your relays. Please try again.")
+		return
+	}
+
+	// Match by exact ID first, then by name prefix (case-insensitive)
+	var target *irisClient.Relay
+	queryLower := strings.ToLower(query)
+	for i := range relays {
+		if relays[i].ID == query {
+			target = &relays[i]
+			break
+		}
+		if strings.HasPrefix(strings.ToLower(relays[i].Name), queryLower) {
+			target = &relays[i]
+		}
+	}
+
+	if target == nil {
+		b.Send(chatID, fmt.Sprintf("❌ No relay found matching `%s`. Use /list to see your relays.", query))
+		return
+	}
+
+	sess := b.sessions.Get(userID)
+	sess.State = StateEditing
+	sess.EditingRelayID = target.ID
+	sess.DraftRelay = nil
+	sess.Conversation = nil
+	b.sessions.Set(userID, sess)
+
+	b.Send(chatID, fmt.Sprintf("✏️ *Editing relay:* *%s* (`%s`)\n\nDescribe what you'd like to change. I'll update it for you.", target.Name, target.ID))
 }
 
 func (b *Bot) cmdList(ctx context.Context, chatID, userID int64) {
@@ -516,6 +570,7 @@ func (b *Bot) cmdCancel(chatID, userID int64) {
 	sess := b.sessions.Get(userID)
 	sess.State = StateIdle
 	sess.DraftRelay = nil
+	sess.EditingRelayID = ""
 	sess.Conversation = nil
 	b.sessions.Set(userID, sess)
 	b.Send(chatID, "✅ Operation cancelled. Use /help for available commands.")
@@ -587,11 +642,21 @@ func (b *Bot) handleDescribe(ctx context.Context, chatID, userID int64, text str
 
 	b.Send(chatID, "🤔 _Thinking..._")
 
-	resp, err := b.iris.GenerateRelay(ctx, link.Token, text, sess.Conversation, "")
+	// Pass the relay ID when editing an existing saved relay so the AI can
+	// fetch its current definition as context.
+	resp, err := b.iris.GenerateRelay(ctx, link.Token, text, sess.Conversation, sess.EditingRelayID)
 	if err != nil {
 		b.log.Error("ai generate relay via core", "err", err)
 		b.Send(chatID, "❌ AI request failed. Please try again.")
 		return
+	}
+
+	// If the AI identified an existing relay to edit (e.g. from a voice note
+	// or idle-state message like "edit my morning relay to run at 8am"),
+	// adopt the returned relay_id so confirm will call UpdateRelay.
+	if resp.RelayID != "" && sess.EditingRelayID == "" {
+		sess.EditingRelayID = resp.RelayID
+		sess.State = StateEditing
 	}
 
 	// Update conversation history
@@ -614,7 +679,8 @@ func (b *Bot) handleDescribe(ctx context.Context, chatID, userID int64, text str
 			}
 			b.Send(chatID, sb.String())
 		}
-		sess.State = StateDescribing
+		// Preserve the current state (StateDescribing or StateEditing) so the
+		// next round of clarification still knows whether we are editing.
 		b.sessions.Set(userID, sess)
 		return
 	}
@@ -625,7 +691,11 @@ func (b *Bot) handleDescribe(ctx context.Context, chatID, userID int64, text str
 	b.sessions.Set(userID, sess)
 
 	b.Send(chatID, formatRelayDraft(resp.Relay))
-	b.Send(chatID, "Reply *confirm* to create, *edit* to modify, or *cancel* to discard.")
+	if sess.EditingRelayID != "" {
+		b.Send(chatID, "Reply *confirm* to save changes, *edit* to refine further, or *cancel* to discard.")
+	} else {
+		b.Send(chatID, "Reply *confirm* to create, *edit* to modify, or *cancel* to discard.")
+	}
 }
 
 func (b *Bot) handleConfirm(ctx context.Context, chatID, userID int64, text string, sess *Session) {
@@ -638,20 +708,39 @@ func (b *Bot) handleConfirm(ctx context.Context, chatID, userID int64, text stri
 			return
 		}
 
-		relay, err := b.iris.CreateRelay(ctx, link.Token, *sess.DraftRelay)
-		if err != nil {
-			b.log.Error("create relay", "err", err)
-			b.Send(chatID, "❌ Failed to create relay: "+err.Error())
-			return
+		var relay *irisClient.Relay
+		var opErr error
+
+		if sess.EditingRelayID != "" {
+			// Update the existing relay instead of creating a new one.
+			relay, opErr = b.iris.UpdateRelay(ctx, link.Token, sess.EditingRelayID, *sess.DraftRelay)
+			if opErr != nil {
+				b.log.Error("update relay", "relay_id", sess.EditingRelayID, "err", opErr)
+				b.Send(chatID, "❌ Failed to update relay: "+opErr.Error())
+				return
+			}
+		} else {
+			relay, opErr = b.iris.CreateRelay(ctx, link.Token, *sess.DraftRelay)
+			if opErr != nil {
+				b.log.Error("create relay", "err", opErr)
+				b.Send(chatID, "❌ Failed to create relay: "+opErr.Error())
+				return
+			}
 		}
 
+		wasEditing := sess.EditingRelayID != ""
 		sess.State = StateIdle
 		sess.DraftRelay = nil
+		sess.EditingRelayID = ""
 		sess.Conversation = nil
 		b.sessions.Set(userID, sess)
 		_ = b.store.ClearAISession(ctx, userID)
 
-		msg := fmt.Sprintf("✅ *Relay created!*\n\nName: *%s*\nID: `%s`", relay.Name, relay.ID)
+		verb := "created"
+		if wasEditing {
+			verb = "updated"
+		}
+		msg := fmt.Sprintf("✅ *Relay %s!*\n\nName: *%s*\nID: `%s`", verb, relay.Name, relay.ID)
 		if relay.TriggerType == "webhook" {
 			webhookURL := fmt.Sprintf("%s/hooks/%s", b.hooksURL, relay.ID)
 			msg += fmt.Sprintf("\n\n🔗 *Webhook URL:*\n`%s`\n\nSend a POST request to this URL to trigger the relay.", webhookURL)
@@ -661,16 +750,23 @@ func (b *Bot) handleConfirm(ctx context.Context, chatID, userID int64, text stri
 		b.Send(chatID, msg)
 
 	case lower == "edit" || lower == "change" || lower == "modify":
+		// Keep EditingRelayID intact — we're still working on the same relay.
 		sess.State = StateEditing
 		b.sessions.Set(userID, sess)
 		b.Send(chatID, "What would you like to change?")
 
 	case lower == "cancel" || lower == "no" || lower == "discard":
+		wasEditing := sess.EditingRelayID != ""
 		sess.State = StateIdle
 		sess.DraftRelay = nil
+		sess.EditingRelayID = ""
 		sess.Conversation = nil
 		b.sessions.Set(userID, sess)
-		b.Send(chatID, "❌ Relay discarded. Use /new to start again.")
+		if wasEditing {
+			b.Send(chatID, "❌ Edit discarded. The relay was not changed.")
+		} else {
+			b.Send(chatID, "❌ Relay discarded. Use /new to start again.")
+		}
 
 	default:
 		b.Send(chatID, "Please reply *confirm*, *edit*, or *cancel*.")
