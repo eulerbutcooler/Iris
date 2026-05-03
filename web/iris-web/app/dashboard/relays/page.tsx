@@ -303,7 +303,8 @@ function RelayCard({
   };
 
   const isWebhook = relay.trigger_type === "webhook";
-  const webhookUrl = isWebhook ? `http://localhost:8080/hooks/${relay.id}` : null;
+  const hooksBase = process.env.NEXT_PUBLIC_HOOKS_URL ?? "http://localhost:8080";
+  const webhookUrl = isWebhook ? `${hooksBase}/hooks/${relay.id}` : null;
 
   function copyUrl(e: React.MouseEvent) {
     e.stopPropagation();
