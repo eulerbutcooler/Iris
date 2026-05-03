@@ -4,9 +4,12 @@
 #   curl -fsSL https://raw.githubusercontent.com/YOURUSER/Iris/main/scripts/setup.sh | bash
 set -e
 
-REPO_URL="https://github.com/eulerbutcooler/Iris.git"   # ← change this
+REPO_URL="https://github.com/eulerbutcooler/Iris.git"
 APP_DIR="/home/iris/Iris"
-DOMAIN="https://iris.amanyd.me"                                           # ← set your domain e.g. "yourdomain.com"
+DOMAIN="${1:-}"   # pass domain as arg or set here, e.g. "iris.amanyd.me" (no https://)
+# Strip https:// or http:// if accidentally included
+DOMAIN="${DOMAIN#https://}"
+DOMAIN="${DOMAIN#http://}"
 
 echo "==> Installing dependencies..."
 apt-get update -q
@@ -33,10 +36,13 @@ sudo -u iris git clone "$REPO_URL" "$APP_DIR"
 
 echo "==> Building Go binaries..."
 cd "$APP_DIR"
-sudo -u iris go build -o bin/core     ./services/core/cmd/api
-sudo -u iris go build -o bin/hooks    ./services/hooks/cmd/server
-sudo -u iris go build -o bin/worker   ./services/worker/cmd
-sudo -u iris go build -o bin/telegram ./services/iris-telegram/cmd/bot
+export PATH=$PATH:/snap/bin
+mkdir -p bin
+go build -o bin/core     ./services/core/cmd/api
+go build -o bin/hooks    ./services/hooks/cmd/server
+go build -o bin/worker   ./services/worker/cmd
+go build -o bin/telegram ./services/iris-telegram/cmd/bot
+chown -R iris:iris bin/
 
 echo "==> Building frontend..."
 cd "$APP_DIR/web/iris-web"
