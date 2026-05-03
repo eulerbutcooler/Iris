@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="web/iris-web/public/logo.png" alt="Iris" width="80" />
+  https://iris.amanyd.me
 </p>
 
 <h1 align="center">Iris</h1>
